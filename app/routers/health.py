@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -22,7 +22,7 @@ class HealthResponse(BaseModel):
     summary="Liveness probe with dependency status",
     response_model=HealthResponse,
 )
-def health() -> HealthResponse:
+def health(response: Response) -> HealthResponse:
     """Used by Render health checks and local smoke tests.
 
     Always answers 200 so the process itself is observed as alive;
@@ -45,6 +45,8 @@ def health() -> HealthResponse:
         pass
 
     overall = "ok" if db_status == "up" else "degraded"
+    if db_status == "down":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(
         status=overall, db=db_status, redis=redis_status, time=datetime.now(tz=UTC)
     )

@@ -1,4 +1,7 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEVELOPMENT_JWT_SECRET = "dev-only-secret-change-me"
 
 
 class Settings(BaseSettings):
@@ -7,7 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://linkforge:linkforge@localhost:5432/linkforge"
     redis_url: str = "redis://localhost:6379/0"
 
-    jwt_secret_key: str = "dev-only-secret-change-me"
+    jwt_secret_key: str = _DEVELOPMENT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 30
 
@@ -24,6 +27,17 @@ class Settings(BaseSettings):
     redirect_rate_window_seconds: int = 60
 
     environment: str = "development"
+
+    @model_validator(mode="after")
+    def require_production_jwt_secret(self) -> "Settings":
+        if self.environment.lower() in {"prod", "production"} and (
+            self.jwt_secret_key == _DEVELOPMENT_JWT_SECRET
+            or len(self.jwt_secret_key) < 32
+        ):
+            raise ValueError(
+                "Production requires a JWT_SECRET_KEY with at least 32 characters."
+            )
+        return self
 
 
 settings = Settings()

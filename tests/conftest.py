@@ -3,6 +3,9 @@ import urllib.parse
 
 import pytest
 
+from alembic import command
+from alembic.config import Config
+
 # ---------------------------------------------------------------------------
 # Database selection MUST happen before importing anything that builds the
 # SQLAlchemy engine: we redirect the test run to a dedicated linkforge_test
@@ -17,6 +20,7 @@ _test_url = urllib.parse.urlunsplit(
     _parts._replace(path="/" + _test_db_name)
 )
 os.environ["DATABASE_URL"] = _test_url
+_settings.database_url = _test_url
 
 
 def _ensure_test_database() -> None:
@@ -44,16 +48,16 @@ from sqlalchemy import text  # noqa: E402
 
 from app.core import redis as redis_module  # noqa: E402
 from app.core.db import engine  # noqa: E402
-from app.db.base import Base  # noqa: E402
 from app.main import app  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _create_tables():
-    """Schema in the test database for the session, dropped at teardown."""
-    Base.metadata.create_all(bind=engine)
+def _migrate_test_database():
+    """Exercise the same Alembic migrations used by local and Render deploys."""
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
     yield
-    Base.metadata.drop_all(bind=engine)
+    command.downgrade(config, "base")
 
 
 @pytest.fixture(autouse=True)

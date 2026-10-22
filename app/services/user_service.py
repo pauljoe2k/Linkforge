@@ -25,9 +25,13 @@ def create_user(db: Session, email: str, password: str) -> User:
     db.add(user)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise DuplicateEmailError(email) from None
+        orig = exc.orig
+        constraint_name = getattr(getattr(orig, "diag", None), "constraint_name", None)
+        if getattr(orig, "sqlstate", None) == "23505" and constraint_name == "ix_users_email":
+            raise DuplicateEmailError(email) from None
+        raise
     db.refresh(user)
     return user
 

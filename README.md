@@ -72,9 +72,13 @@ docker compose up -d            # Postgres :5433, Redis :6380 (ports chosen to
 python -m pip install -r requirements.txt
 cp .env.example .env            # adjust DATABASE_URL/REDIS_URL if you changed ports
 python -m alembic upgrade head
-python -m pytest tests/         # 78 tests, dedicated linkforge_test DB
-python -m uvicorn app.main:app --reload   # → http://localhost:8000/docs
+python -m pytest tests/         # dedicated linkforge_test DB
+python -m uvicorn app.main:app --reload   # dashboard → http://localhost:8000/
 ```
+
+The dashboard at `/` supports registration/sign-in, creating and copying short
+links, deleting links, and viewing click, device, daily, and referrer analytics.
+The interactive API remains available at `/docs`.
 
 Note on tests: the suite creates its own `linkforge_test` database (derived from
 `DATABASE_URL`) and never touches the dev database. Isolation is truncate-per-test,
@@ -152,15 +156,18 @@ repeat with `DISABLE_REDIRECT_CACHE=true` on the *server* process.
    select this repository. Review the services and plans before applying:
    `render.yaml` declares the web service, managed Postgres, and a Key Value
    cache, wires `DATABASE_URL` / `REDIS_URL` automatically, and generates
-   `JWT_SECRET_KEY`. The cache is restricted to Render's private network.
+   `JWT_SECRET_KEY`. The app refuses to start in production without a generated,
+   strong JWT secret. The cache is restricted to Render's private network.
 3. The Docker image runs `alembic upgrade head` at boot, then uvicorn on `$PORT`.
-   Health check: `/health`.
+   Health check: `/health` returns 503 when Postgres is unavailable. Redis status
+   is reported separately because cache and rate limiting fail open on Redis outages.
 4. Verify: `GET /health` shows `db: up, redis: up`; register → login → create →
    redirect → analytics through the public URL.
 5. Post-deploy: run `loadtest/locustfile.py` against the live URL with a modest
    free-tier budget (RLS: cap `-u 10`, 30s) and record numbers here.
-   Free-tier Notes: the web service cold-starts after ~15 min idle; the free
-   Postgres expires after 30 days — move both to starters for a durable demo.
+   The free web service can sleep after inactivity, and the free Postgres expires
+   after 30 days. Treat these plans as a demo only; choose paid plans in the
+   Blueprint before applying it for persistent hosting and backups.
 
 ## Postman
 

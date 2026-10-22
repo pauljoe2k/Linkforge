@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
 from app.routers import analytics, auth, health, links, redirect
 
@@ -17,6 +20,12 @@ app = FastAPI(
         {"name": "health", "description": "Liveness and dependency checks."},
     ],
 )
+
+
+@app.get("/", include_in_schema=False)
+def frontend() -> FileResponse:
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
+
 
 app.include_router(health.router)
 app.include_router(auth.router)
