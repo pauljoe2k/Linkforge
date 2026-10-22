@@ -159,6 +159,7 @@ repeat with `DISABLE_REDIRECT_CACHE=true` on the *server* process.
    `JWT_SECRET_KEY`. The app refuses to start in production without a generated,
    strong JWT secret. The cache is restricted to Render's private network.
 3. The Docker image runs `alembic upgrade head` at boot, then uvicorn on `$PORT`.
+   Render's PostgreSQL URL is normalized to the installed psycopg 3 driver.
    Health check: `/health` returns 503 when Postgres is unavailable. Redis status
    is reported separately because cache and rate limiting fail open on Redis outages.
 4. Verify: `GET /health` shows `db: up, redis: up`; register → login → create →

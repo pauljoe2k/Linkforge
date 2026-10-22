@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEVELOPMENT_JWT_SECRET = "dev-only-secret-change-me"
@@ -9,6 +9,15 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://linkforge:linkforge@localhost:5432/linkforge"
     redis_url: str = "redis://localhost:6379/0"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_psycopg3_driver(cls, value: str) -> str:
+        if isinstance(value, str):
+            for scheme in ("postgres://", "postgresql://"):
+                if value.startswith(scheme):
+                    return "postgresql+psycopg://" + value[len(scheme) :]
+        return value
 
     jwt_secret_key: str = _DEVELOPMENT_JWT_SECRET
     jwt_algorithm: str = "HS256"
