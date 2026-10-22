@@ -1,206 +1,143 @@
 # Linkforge
 
-A URL shortener with a full analytics API, built as an 8-day study project:
-**FastAPI · PostgreSQL · SQLAlchemy 2.0 + Alembic · Redis · JWT (Argon2id) · Pydantic v2 · pytest · Docker Compose · GitHub Actions · Render**.
+Linkforge turns long URLs into short links and tracks how people use them.
+It includes a web dashboard, a REST API, and click analytics.
 
-> Status: MVP feature-complete locally, 78 tests green at 96% coverage, load-tested.
-> Render deployment pending first push to GitHub (runbook below).
+## Features
 
-## Architecture
+- Create accounts and sign in.
+- Create random or custom short links.
+- Update, deactivate, and delete your links.
+- Track total clicks, device types, daily activity, and referrers.
+- Cache redirects with Redis and rate-limit API requests.
+- Explore the API at `/docs`.
 
-```mermaid
-flowchart LR
-    Visitor(("Visitor")) -->|"GET /{slug}"| Redirect["Redirect router<br/>(public)"]
-    Visitor -->|"click logged async"| BG[(BackgroundTasks)]
-    Owner(("Link owner")) -->|"Bearer JWT"| API["Auth + Links + Analytics"]
-    Redirect -->|cache hit?| Redis[("Redis<br/>slug→JSON cache<br/>TTL 300s")]
-    Redirect -->|miss| PG[(("PostgreSQL<br/>links"))]
-    Redis -->|hit: still logs click| BG
-    API --> PG
-    BG -->|"INSERT clicks"| PG
-    Redis -.->|rate counters<br/>fixed window| Limits["Rate limiters<br/>per-user API · per-IP redirect"]
-    Limits -.-> Redirect
-    Limits -.-> API
-```
+## Built with
 
-Key flow in words: a redirect **never writes to Postgres synchronously** — the click is
-logged by a FastAPI background task after the 302 is already in flight, and with a warm
-Redis cache the request reads *nothing* from Postgres at all.
+FastAPI · PostgreSQL · SQLAlchemy · Alembic · Redis · JWT · Argon2id · Docker
 
-## Data model
+## Run locally
 
-```
-users(id PK identity, email UNIQUE, password_hash, created_at, updated_at)
-links(id PK, user_id FK→users ON DELETE CASCADE, slug UNIQUE, target_url,
-      is_active, created_at, updated_at)
-clicks(id PK, link_id FK→links ON DELETE CASCADE, clicked_at, referrer NULL,
-       device_type CHECK IN (desktop/mobile/tablet/other))
+### Requirements
 
-Indexes:
-  ix_users_email                  UNIQUE btree (email)
-  ix_links_slug                   UNIQUE btree (slug)          ← redirect hot path
-  ix_links_user_id_created_at     btree (user_id, created_at)  ← paginated owner list
-  ix_clicks_link_id_clicked_at    btree (link_id, clicked_at)  ← all analytics
-```
+- Python 3.12
+- Docker Desktop with Docker Compose
 
-The composite `(link_id, clicked_at)` index was verified with real `EXPLAIN` output to
-serve daily grouping, referrer grouping, and totals — no post-hoc index fixes were needed.
+### Start the app
 
-## Endpoints (auth = Bearer JWT)
+From the repository root, run:
 
-| Method | Path | Status | Notes |
-|---|---|---|---|
-| POST | `/auth/register` | 201 | 409 duplicate email, 422 validation |
-| POST | `/auth/login` | 200 | 401 identical for unknown email ≠ wrong password |
-| GET | `/auth/me` | 200 | 401 without/with bad token |
-| POST | `/links` | 201 | random or custom slug; 409 taken, 422 bad URL |
-| GET | `/links?limit&offset` | 200 | paginated, newest first |
-| GET | `/links/{id}` | 200 | 404 if not yours (indistinguishable) |
-| PATCH | `/links/{id}` | 200 | 404/409/422 |
-| DELETE | `/links/{id}` | 204 | click history cascades |
-| GET | `/{slug}` | **302** | 404 unknown/deactivated, 429 per-IP |
-| GET | `/links/{id}/analytics/summary` | 200 | total + device breakdown |
-| GET | `/links/{id}/analytics/daily?start=&end=` | 200 | SQL date_trunc grouping |
-| GET | `/links/{id}/analytics/referrers?limit=` | 200 | NULL referrer → `direct` |
-| GET | `/health` | 200 | reports db/redis status |
-
-## Setup (local)
-
-```bash
-docker compose up -d            # Postgres :5433, Redis :6380 (ports chosen to
-                                # avoid clashes with other local stacks)
+```powershell
+docker compose up -d
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-cp .env.example .env            # adjust DATABASE_URL/REDIS_URL if you changed ports
+Copy-Item .env.example .env
 python -m alembic upgrade head
-python -m pytest tests/         # dedicated linkforge_test DB
-python -m uvicorn app.main:app --reload   # dashboard → http://localhost:8000/
+python -m uvicorn app.main:app --reload
 ```
 
-The dashboard at `/` supports registration/sign-in, creating and copying short
-links, deleting links, and viewing click, device, daily, and referrer analytics.
-The interactive API remains available at `/docs`.
+Open the dashboard at [http://localhost:8000](http://localhost:8000).
+The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-Note on tests: the suite creates its own `linkforge_test` database (derived from
-`DATABASE_URL`) and never touches the dev database. Isolation is truncate-per-test,
-on both sides of every test, plus a Redis `flushall` — chosen over rollback-per-test
-because the app intentionally uses multiple connections per request (get_db session +
-background-task session), which a single outer transaction cannot see. See
-[tests/conftest.py](tests/conftest.py) for the full rationale.
+The local Docker services use PostgreSQL on port `5433` and Redis on port
+`6380`. The `.env.example` file is configured for these ports. Keep `.env`
+local; do not use its localhost URLs or development secret in a hosted service.
 
-## Design decisions (defend these out loud)
+### Run tests and lint
 
-**302 over 301.** Browsers/proxies cache 301s indefinitely: repeat visitors would
-disappear from analytics and stale targets would survive cache invalidation. 302 keeps
-the data true; SEO authority transfer was consciously out of scope. Straight from the
-redirect handler comment.
+Tests use a separate `linkforge_test` database derived from `DATABASE_URL`.
+Make sure the local Postgres and Redis services are running first.
 
-**Scheme allowlist (`http`/`https`).** `javascript:`, `data:`, `file:` etc. are rejected
-at schema validation → 422, so no short link can smuggle a script or binary handler.
-URL length is capped (2048) to keep things sane.
+```powershell
+python -m pytest tests/ --cov=app --cov-report=term-missing
+python -m ruff check app tests loadtest
+```
 
-**Random slugs: 7 chars, base62, `secrets`-driven.** ~3.5×10¹² combinations ≈ full
-62-bit unguessability; CSPRNG so slugs can't be predicted; collision retry with a
-documented length-extension fallback.
+## API overview
 
-**Argon2id** (64 MiB, t=3 defaults) — PHC winner, memory-hard, GPU-resistant; salt
-embedded; garbage-hash-safe verification. JWTs carry only `sub`/`iat`/`exp`/`type`
-(no PII — tokens are base64, not encrypted); 30-min access tokens, no refresh tokens
-in the MVP (documented trade-off); HS256 until a second verifier appears (then RS256).
-Login returns byte-identical errors for "unknown email" and "wrong password", and burns
-one Argon2 hash on the unknown-email path so response *timing* can't enumerate users.
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/auth/register` | Create an account |
+| `POST` | `/auth/login` | Sign in and receive an access token |
+| `GET` | `/auth/me` | Get the signed-in user |
+| `POST` | `/links` | Create a short link |
+| `GET` | `/links` | List your links |
+| `GET`, `PATCH`, `DELETE` | `/links/{id}` | Read, update, or delete one of your links |
+| `GET` | `/{slug}` | Redirect to the destination and record a click |
+| `GET` | `/links/{id}/analytics/summary` | View total clicks and device breakdown |
+| `GET` | `/links/{id}/analytics/daily` | View clicks per day |
+| `GET` | `/links/{id}/analytics/referrers` | View top traffic sources |
+| `GET` | `/health` | Check service and dependency status |
 
-**Cache-invalidation correctness over hit-rate tricks.** Cached value is JSON
-`{link_id, target_url}` so a cache hit still logs the click without a DB read; every
-update/delete `DEL`s the affected keys outright (both old and new slugs on rename).
-Redis failures fail open (cache miss, limiter allows) — a cache must never turn a
-healthy backend into a broken one.
+Management and analytics endpoints require a bearer token. Link ownership is
+checked on every request. Short-link destinations must use `http` or `https`.
 
-**Rate limits: fixed window** (one INCR + one EXPIRE). Sliding windows buy boundary-burst
-precision (fixed windows allow ~2× across a boundary) at the cost of ZSETs or extra
-round-trips. Defaults: 100/min per user (API), 30/min per IP (redirect), both
-`429 + Retry-After`. Behind a proxy the IP key must move to the rightmost
-X-Forwarded-For hop — noted in code.
+## How redirects and analytics work
 
-**Ownership = 404, not 403.** Foreign and nonexistent link ids are indistinguishable
-across GET/PATCH/DELETE and all three analytics endpoints — one body, no id-probing
-oracle.
+Redirect lookups use Redis when available and fall back to PostgreSQL on a
+cache miss or Redis outage. Link changes invalidate affected cache entries.
+The app returns a temporary `302` redirect so future visits can be counted and
+updated destinations can take effect.
 
-## Load tests
+Click events are saved in a background task after the redirect is prepared.
+Analytics are aggregated in PostgreSQL and include total clicks, device type,
+daily counts, and referrers. Visits without a referrer are grouped as `direct`.
 
-Locust against a single local slug, 10 concurrent users, 15s steady window
-(`loadtest/locustfile.py`; k6 equivalent in `loadtest/redirect.js`):
+## Deploy to Render
 
-| Config | req count (15s) | RPS | p50 | p95 |
-|---|---|---|---|---|
-| Redis cache **on** | 3137 | ~209 | 17 ms | **31 ms** |
-| Redis cache **off** | 2254 | ~150 | 34 ms | **63 ms** |
+The repository includes a Render Blueprint in [`render.yaml`](render.yaml).
+In Render, choose **New → Blueprint**, connect this repository, and review the
+services before applying the Blueprint. It defines:
 
-At 50 concurrent users both configs converged (~167-170 RPS, p50 ~250-260 ms): the
-bottleneck becomes the per-request click INSERT commit against local Dockerized
-Postgres + the click-minutes disk, not slug lookup. That's the honest reading: the
-cache halves redirect latency pre-saturation and removes ~40% of DB reads, while the
-next architectural lever (batched click writes) targets the saturation ceiling.
+- A Docker web service.
+- A PostgreSQL database.
+- A Redis-compatible Key Value service.
 
-Method: read **RPS** as completed requests/second in the steady window only;
-**P95** from the `/[slug]` stats row; ignore ramp-up edges; treat failures > 0 as a
-failed run rather than a datapoint.
+The Blueprint wires the hosted database and cache URLs into the app and
+generates a production JWT secret. The Docker container applies Alembic
+migrations before starting the web server. After deployment, check
+`https://<your-service>.onrender.com/health`, then open the service URL to use
+the dashboard.
 
-Reproduce: `python loadtest/seed.py`, start uvicorn (`REDIRECT_RATE_LIMIT=100000`
-so the per-IP limiter doesn't throttle the single-IP generator), run locust, then
-repeat with `DISABLE_REDIRECT_CACHE=true` on the *server* process.
+Review Render's current plan and pricing before applying. The Blueprint uses
+free plans; the web service may sleep when idle, and the free PostgreSQL
+database expires after 30 days. Choose a persistent plan for data you need to
+keep. Never set hosted environment variables to local `localhost` URLs or the
+development JWT secret.
 
-## Deploy to Render (runbook)
+## CI
 
-1. Push this repo to GitHub (CI runs on `main` and PRs).
-2. In Render: **New → Blueprint**, connect the GitHub account if prompted, and
-   select this repository. Review the services and plans before applying:
-   `render.yaml` declares the web service, managed Postgres, and a Key Value
-   cache, wires `DATABASE_URL` / `REDIS_URL` automatically, and generates
-   `JWT_SECRET_KEY`. The app refuses to start in production without a generated,
-   strong JWT secret. The cache is restricted to Render's private network.
-3. The Docker image runs `alembic upgrade head` at boot, then uvicorn on `$PORT`.
-   Render's PostgreSQL URL is normalized to the installed psycopg 3 driver.
-   Health check: `/health` returns 503 when Postgres is unavailable. Redis status
-   is reported separately because cache and rate limiting fail open on Redis outages.
-4. Verify: `GET /health` shows `db: up, redis: up`; register → login → create →
-   redirect → analytics through the public URL.
-5. Post-deploy: run `loadtest/locustfile.py` against the live URL with a modest
-   free-tier budget (RLS: cap `-u 10`, 30s) and record numbers here.
-   The free web service can sleep after inactivity, and the free Postgres expires
-   after 30 days. Treat these plans as a demo only; choose paid plans in the
-   Blueprint before applying it for persistent hosting and backups.
+GitHub Actions runs on pushes to `main` and pull requests. It builds the Docker
+image, runs Ruff, and runs the tests with PostgreSQL and Redis services.
 
-## Postman
+## Project layout
 
-Import [linkforge.postman_collection.json](linkforge.postman_collection.json): set
-`baseUrl` once, run **Login** — the collection script stores the token into
-`{{accessToken}}` for every other request, and Create-link captures `{{linkId}}`/`{{slug}}`.
+```text
+app/
+  routers/       API endpoints
+  schemas/       Request and response validation
+  services/      Authentication, links, cache, rate limits, analytics
+  models/        Database models
+  static/        Browser dashboard
+alembic/         Database migrations
+tests/            Automated tests
+loadtest/         Locust and k6 redirect load tests
+Dockerfile        Production container
+render.yaml       Render Blueprint
+```
 
-## Test & quality snapshot
+## Load testing
 
-- **78 tests, 96% coverage** (`python -m pytest tests/ --cov=app --cov-report=term-missing`)
-- Weakest area post-improvement: `app/services/cache.py` (91%) — remaining lines are
-  logging branches inside Redis-outage handlers.
-- Ruff clean (`ruff check app tests loadtest`).
-- CI: `.github/workflows/ci.yml` — lint job + test job with Postgres/Redis services;
-  fails on lint error or test failure; uploads coverage.xml artifact.
+The repository includes a Locust test and a k6 script for the public redirect
+endpoint. To seed a local link and run Locust:
 
-## Resume bullets (fill in the real numbers)
+```powershell
+python loadtest/seed.py
+python -m locust -f loadtest/locustfile.py --headless -u 10 -r 10 --run-time 30s --host http://localhost:8000
+```
 
-- Built a URL-shortener service (FastAPI, PostgreSQL, SQLAlchemy 2.0, Redis, JWT/Argon2id)
-  with **[N] automated tests at [XX]% coverage**, shipped to production on Render behind
-  a GitHub Actions CI pipeline (lint + integration tests against real Postgres/Redis).
-- Cut redirect p95 latency from **[63] ms to [31] ms** (-[51]%) at **[~210] req/s** by
-  introducing a Redis-backed slug cache with delete-on-write invalidation, verified
-  with Locust A/B load tests (cache on/off).
-- Designed an analytics pipeline queuing redirect events as background tasks (
-  **[209] req/s sustained, 0% error rate**, 5,000+ click demo dataset), with SQL-side
-  aggregation verified via EXPLAIN plans and composite indexes.
-
-## What's next (known limits)
-
-- Click writes are one-row-per-request commits; a buffered writer would lift the
-  saturation ceiling further.
-- Refresh tokens / token revocation, OAuth proxies, and custom domains are the natural
-  v2; per-user daily API rates and per-link analytics windows are configurable but not
-  yet user-facing.
+Set `LINKFORGE_SLUG` if you want to test a slug other than `loadtest`. To
+compare cache behavior, set `DISABLE_REDIRECT_CACHE=true` on the application
+process and repeat the run. Treat results as failed if the test reports
+request failures.
