@@ -1,0 +1,43 @@
+# Render Blueprint: `render blueprint launch` or connect the repo in the
+# dashboard and Render turns this file into the full stack.
+services:
+  - type: web
+    name: linkforge-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free            # cold-starts ~1min after 15min idle; starter = always-on
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: linkforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: linkforge-redis
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true   # 64 hex chars, survives restarts
+      - key: ENVIRONMENT
+        value: production
+      # Rate-limit + cache tuning via env vars (see app/core/config.py):
+      - key: REDIRECT_RATE_LIMIT
+        value: "30"
+      - key: API_RATE_LIMIT
+        value: "100"
+      - key: CACHE_REDIRECT_TTL_SECONDS
+        value: "300"
+  - type: keyvalue
+    name: linkforge-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+databases:
+  - name: linkforge-db
+    plan: free            # free Postgres expires after 30 days
+    databaseName: linkforge
+    user: linkforge

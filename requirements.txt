@@ -1,0 +1,32 @@
+# Web framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+
+# Pydantic v2 (+ settings management)
+pydantic==2.11.4
+pydantic-settings==2.9.1
+email-validator==2.2.0
+
+# Database
+sqlalchemy==2.0.40
+alembic==1.15.2
+psycopg[binary]==3.2.9
+
+# Redis
+redis==5.2.1
+
+# Auth (wired up on Day 2, pinned now so one install covers the project)
+pyjwt==2.10.1
+argon2-cffi==23.1.0
+
+# Testing
+pytest==8.3.5
+pytest-cov==6.1.1
+httpx==0.28.1
+
+# Linting (Day 6)
+ruff==0.11.13
+
+# Load testing (Day 7)
+locust==2.32.4
+psycopg==3.2.9
