@@ -40,12 +40,18 @@
       .eyebrow { color: var(--green); font-size: 11px; font-weight: 750; letter-spacing: 1.45px; text-transform: uppercase; }
       h1 { margin: 8px 0 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -1.5px; line-height: 1.1; }
       .subtitle { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
-      .layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, .85fr); gap: 20px; align-items: start; }
-      .stack { display: grid; gap: 20px; }
+      .layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .85fr); gap: 32px; align-items: start; }
+      .stack { display: grid; min-width: 0; gap: 24px; }
       .card { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 3px 12px #19251f05; }
       .card-head { padding: 20px 22px 15px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .card-head h2 { margin: 0; font-size: 15px; letter-spacing: -.25px; }
       .card-head p { margin: 5px 0 0; font-size: 12px; color: var(--muted); }
+      .analytics-card { min-width: 0; }
+      .analytics-head { align-items: end; flex-wrap: wrap; }
+      .analytics-picker { display: grid; min-width: min(220px, 100%); gap: 6px; }
+      .analytics-picker label { color: var(--muted); font-size: 10px; font-weight: 650; }
+      .analytics-picker select { width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 0 30px 0 10px; color: var(--ink); background: white; font: inherit; font-size: 11px; }
+      .analytics-picker select:focus { border-color: #74a88b; outline: 3px solid #176b4a15; }
       .create-card { padding: 22px; }
       .create-card h2 { margin: 0; font-size: 16px; }
       .create-card > p { margin: 6px 0 19px; color: var(--muted); font-size: 12px; }
@@ -87,7 +93,6 @@
       .referrer-name { overflow: hidden; color: #53625a; text-overflow: ellipsis; white-space: nowrap; }
       .referrer-count { flex: 0 0 auto; color: var(--ink); font-weight: 700; }
       .muted-empty { padding: 4px 20px 19px; color: var(--muted); font-size: 11px; }
-      .selected-label { max-width: 130px; overflow: hidden; color: var(--green); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 700; }
       .toast { position: fixed; right: 22px; bottom: 22px; z-index: 3; max-width: calc(100vw - 44px); padding: 13px 17px; border-radius: 10px; color: white; background: #19251f; box-shadow: 0 8px 30px #19251f30; font-size: 13px; }
       .toast.error { background: #a34032; }
       [hidden] { display: none !important; }
@@ -103,7 +108,8 @@
         .top-right .button { min-height: 36px; padding: 0 11px; }
         .links-table th, .links-table td { padding-right: 11px; padding-left: 11px; }
         .target-col { display: none; }
-        .selected-label { max-width: 95px; }
+        .analytics-head { align-items: stretch; }
+        .analytics-picker { width: 100%; }
       }
     </style>
   </head>
@@ -149,7 +155,6 @@
           <section class="card">
             <div class="card-head">
               <div><h2>Your links</h2><p id="links-caption">Sign in to see your links.</p></div>
-              <span class="selected-label" id="selected-link" hidden></span>
             </div>
             <div id="links-empty" class="empty">
               <div class="empty-mark" aria-hidden="true">↗</div>
@@ -170,9 +175,13 @@
           </section>
         </div>
 
-        <aside class="card" id="analytics-card">
-          <div class="card-head">
+        <aside class="card analytics-card" id="analytics-card">
+          <div class="card-head analytics-head">
             <div><h2>Link analytics</h2><p id="analytics-caption">Choose a link to explore its performance.</p></div>
+            <div class="analytics-picker" id="analytics-picker" hidden>
+              <label for="analytics-link-select">Show analytics for</label>
+              <select id="analytics-link-select" aria-label="Choose a link for analytics"></select>
+            </div>
           </div>
           <div class="stats-grid">
             <div class="stat"><span class="stat-label">Total clicks</span><strong class="stat-value" id="total-clicks">—</strong></div>
@@ -273,23 +282,43 @@
             $("links-empty").hidden = false;
             $("links-wrap").hidden = true;
             $("no-links").hidden = true;
-            $("selected-link").hidden = true;
-            $("analytics-caption").textContent = "Choose a link to explore its performance.";
-            $("total-clicks").textContent = "—";
-            $("top-device").textContent = "—";
-            $("daily-chart").replaceChildren();
-            $("referrers").replaceChildren();
-            $("referrers-empty").hidden = false;
+            $("analytics-picker").hidden = true;
+            clearAnalytics();
           } else {
             $("links-empty").hidden = true;
             $("links-wrap").hidden = state.links.length === 0;
             $("no-links").hidden = state.links.length !== 0;
+            $("analytics-picker").hidden = state.links.length === 0;
           }
+        }
+
+        function clearAnalytics() {
+          $("analytics-caption").textContent = "Choose a link to explore its performance.";
+          $("total-clicks").textContent = "—";
+          $("top-device").textContent = "—";
+          $("daily-chart").replaceChildren();
+          $("chart-caption").textContent = "Select a link to see its analytics.";
+          $("referrers").replaceChildren();
+          $("referrers-empty").hidden = false;
+        }
+
+        function renderAnalyticsSelect() {
+          const select = $("analytics-link-select");
+          select.replaceChildren();
+          for (const link of state.links) {
+            const option = document.createElement("option");
+            option.value = String(link.id);
+            option.textContent = `/${link.slug}`;
+            select.append(option);
+          }
+          $("analytics-picker").hidden = !state.user || state.links.length === 0;
+          if (state.selectedId !== null) select.value = String(state.selectedId);
         }
 
         function renderLinks() {
           renderSession();
           if (!state.user) return;
+          renderAnalyticsSelect();
           const body = $("links-body");
           body.replaceChildren();
           for (const link of state.links) {
@@ -322,19 +351,13 @@
             copy.type = "button";
             copy.textContent = "Copy";
             copy.addEventListener("click", () => copyLink(link));
-            const analytics = document.createElement("button");
-            analytics.className = "text-button";
-            analytics.type = "button";
-            analytics.textContent = "Stats";
-            analytics.setAttribute("aria-label", `Show analytics for ${link.slug}`);
-            analytics.addEventListener("click", () => loadAnalytics(link));
             const remove = document.createElement("button");
             remove.className = "button button-danger button-small";
             remove.type = "button";
             remove.textContent = "Delete";
             remove.setAttribute("aria-label", `Delete ${link.slug}`);
             remove.addEventListener("click", () => deleteLink(link));
-            actions.append(copy, analytics, remove);
+            actions.append(copy, remove);
             actionsCell.append(actions);
             row.append(shortCell, targetCell, clicksCell, actionsCell);
             body.append(row);
@@ -363,11 +386,14 @@
               if (state.token) showToast(`Could not load click totals: ${error.message}`, true);
             }
           }));
+          if (!state.links.some((link) => link.id === state.selectedId)) {
+            state.selectedId = state.links.length ? state.links[0].id : null;
+          }
           renderLinks();
-          if (state.selectedId && state.links.some((link) => link.id === state.selectedId)) {
+          if (state.selectedId !== null) {
             await loadAnalytics(state.links.find((link) => link.id === state.selectedId));
-          } else if (state.links.length) {
-            await loadAnalytics(state.links[0]);
+          } else {
+            clearAnalytics();
           }
         }
 
@@ -377,8 +403,7 @@
 
         async function loadAnalytics(link) {
           state.selectedId = link.id;
-          $("selected-link").textContent = `/${link.slug}`;
-          $("selected-link").hidden = false;
+          $("analytics-link-select").value = String(link.id);
           $("analytics-caption").textContent = `Performance for /${link.slug}`;
           const end = new Date();
           const start = new Date(end);
@@ -483,6 +508,10 @@
         $("refresh-button").addEventListener("click", async () => {
           try { await loadLinks(); showToast("Your links are up to date."); }
           catch (error) { showToast(error.message, true); }
+        });
+        $("analytics-link-select").addEventListener("change", async (event) => {
+          const link = state.links.find((item) => String(item.id) === event.target.value);
+          if (link) await loadAnalytics(link);
         });
 
         $("auth-form").addEventListener("submit", async (event) => {
